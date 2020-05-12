@@ -121,7 +121,7 @@ get_token() {
                 fi
             else
                 ${TOKEN_AUTH_DEBUG} && >&2 echo "DDD Using basic authentication"
-                basic_auth="--user '${user}:${password}'"
+                basic_auth="--user ${user}:${password}"
             fi
             ${TOKEN_AUTH_DEBUG} && >&2 echo curl "${realm}" \
                 --silent \
