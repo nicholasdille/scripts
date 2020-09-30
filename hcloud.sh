@@ -21,13 +21,13 @@ hcloud2ansible() {
 ansible_host: ${SERVER_IP}
 ansible_user: deploy
 ansible_become: yes
-ansible_ssh_private_key_file: ~/id_rsa_hetzner
+ansible_ssh_private_key_file: ~/.ssh/id_rsa_hetzner
 EOF
     done
 }
 
 hcloud2ssh() {
-    SSH_KEY_FILE=~/id_rsa_hetzner
+    SSH_KEY_FILE=~/.ssh/id_rsa_hetzner
     if [[ -n "$1" ]]; then
         SSH_KEY_FILE=$1
     fi
@@ -116,7 +116,7 @@ EOF1
 Host docker-hcloud ${HCLOUD_VM_IP}
     HostName ${HCLOUD_VM_IP}
     User root
-    IdentityFile ~/id_rsa_hetzner
+    IdentityFile ~/.ssh/id_rsa_hetzner
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 EOF
