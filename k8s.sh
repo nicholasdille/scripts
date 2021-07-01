@@ -18,12 +18,12 @@ k8s_api() {
 
 k8s2ssh() {
     if [[ "$#" == 1 ]]; then
-        CLUSTER=$1
+        local CLUSTER=$1
     fi
-    SSH_KEY=~/id_rsa
+    SSH_KEY=${SSH_KEY:-~/id_rsa}
     if [[ -z "${CLUSTER}" ]]; then
-        CONTEXT=$(kubectl config current-context)
-        CLUSTER=$(kubectl config get-contexts ${CONTEXT} | tail -n +2 | tr -s ' ' | cut -d' ' -f3)
+        local CONTEXT=$(kubectl config current-context)
+        local CLUSTER=$(kubectl config get-contexts ${CONTEXT} | tail -n +2 | tr -s ' ' | cut -d' ' -f3)
     fi
     if [[ -z "${CLUSTER}" ]]; then
         echo Unable to determine cluster name
@@ -35,8 +35,8 @@ k8s2ssh() {
     rm -f ~/.ssh/config.d/k8s_${CLUSTER}_*
     kubectl get nodes -o wide | tail -n +2 | tr -s ' ' | while read LINE
     do
-        SERVER_NAME=$(echo $LINE | cut -d' ' -f1)
-        SERVER_IP=$(echo $LINE | cut -d' ' -f6)
+        local SERVER_NAME=$(echo $LINE | cut -d' ' -f1)
+        local SERVER_IP=$(echo $LINE | cut -d' ' -f6)
 
         cat > ~/.ssh/config.d/k8s_${CLUSTER}_${SERVER_NAME} <<EOF
 Host ${SERVER_NAME} ${SERVER_IP}
