@@ -54,46 +54,56 @@ EOF
 
 docker-hcloud() {
     mkdir -p ~/.config/docker-hcloud
-    CONFIG_FILE=~/.config/docker-hcloud/config.sh
-    [[ -f "${CONFIG_FILE}" ]] && . ${CONFIG_FILE}
-    : "${VM_BASE_NAME:=docker}"
-    : "${HCLOUD_IMAGE:=ubuntu-18.04}"
-    : "${HCLOUD_LOCATION:=fsn1}"
-    : "${HCLOUD_SSH_KEY:=209622}"
-    : "${HCLOUD_TYPE:=cx21}"
+    #CONFIG_FILE=~/.config/docker-hcloud/config.sh
+    #[[ -f "${CONFIG_FILE}" ]] && . ${CONFIG_FILE}
+    test -n "${VM_BASE_NAME}" || local VM_BASE_NAME=docker
+    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-20.04
+    test -n "${HCLOUD_LOCATION}" || local HCLOUD_LOCATION=fsn1
+    test -n "${HCLOUD_SSH_KEY}" || local HCLOUD_SSH_KEY=209622
+    test -n "${HCLOUD_TYPE}" || local HCLOUD_TYPE=cx21
+
+    echo "Creating VM with type <${HCLOUD_TYPE}> and image <${HCLOUD_IMAGE}> in location <${HCLOUD_LOCATION}>"
 
     if ! test -f ~/.config/docker-hcloud/docker-user-data.txt; then
         cat >~/.config/docker-hcloud/docker-user-data.txt <<EOF1
 #!/bin/bash
 
-curl --fail --location https://get.docker.com | sh
+GROUP_NAME=user
+GROUP_ID=1000
+USER_NAME=user
+USER_ID=1000
+USER_SHELL=/bin/bash
+USER_HOME=/home/${USER_NAME}
 
-apt-get -y install curl jq make
+apt-get update
+apt-get -y install \
+    bash \
+    curl \
+    jq \
+    git \
+    make
 
-# kubectl
-curl --silent https://storage.googleapis.com/kubernetes-release/release/stable.txt | \
-    xargs -I{} curl --silent --location --output /usr/local/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/{}/bin/linux/amd64/kubectl
-chmod +x /usr/local/bin/kubectl
-cat >>~/.bashrc <<EOF2
-source <(kubectl completion bash)
-alias k=kubectl
-complete -F __start_kubectl k
-EOF2
+curl -fL https://get.docker.com | sh
 
-# k3s
-curl --silent https://api.github.com/repos/rancher/k3s/releases/latest | \
-    jq --raw-output '.assets[] | select(.name == "k3s") | .browser_download_url' | \
-    xargs curl --silent --location --fail --output /usr/local/bin/k3s
-chmod +x /usr/local/bin/k3s
+groupadd --gid "${GROUP_ID}" "${GROUP_NAME}"
+useradd --create-home --shell "${USER_SHELL}" --uid "${USER_ID}" --gid "${GROUP_NAME}" "${USER_NAME}"
 
-# k3d
-curl --silent https://raw.githubusercontent.com/rancher/k3d/master/install.sh | bash
+mkdir "${USER_HOME}/.ssh"
+chmod 0700 "${USER_HOME}/.ssh"
+chown user:user "${USER_HOME}/.ssh"
+cp /root/.ssh/authorized_keys "${USER_HOME}/.ssh"
+chmod 0600 "${USER_HOME}/.ssh/authorized_keys"
+chown -R user:user "${USER_HOME}/.ssh"
 
-# kind
-curl --silent https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | \
-        jq --raw-output '.assets[] | select(.name == "kind-linux-amd64") | .browser_download_url' | \
-            xargs curl --silent --location --fail --output /usr/local/bin/kind
-chmod +x /usr/local/bin/kind
+sudo -u user env "USER=${USER_NAME}" "HOME=${USER_HOME}" bash <<EOF
+set -xe
+printenv | sort
+git clone --bare https://github.com/nicholasdille/dotfiles "${USER_HOME}/.cfg"
+alias config='/usr/bin/git --git-dir="${USER_HOME}/.cfg" --work-tree="${USER_HOME}"'
+config config --local status.showUntrackedFiles no
+rm "${USER_HOME}/.bash_logout" "${USER_HOME}/.bashrc" "${USER_HOME}/.profile"
+config checkout
+EOF
 EOF1
     fi
 
