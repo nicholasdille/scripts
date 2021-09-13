@@ -23,6 +23,9 @@ class Cve(object):
         self.id = id
         self.description = description
         self.date = date
+        self.link = f"https://nvd.nist.gov/vuln/detail/{id}"
+        self.severity = "unknown"
+        self.cpe = ""
         self.properties = []
 
     def addProperty(self, name, value):
@@ -31,7 +34,7 @@ class Cve(object):
         logging.debug(f'{self} now has {len(self.properties)} properties')
 
     def toJson(self) -> str:
-        json = f'"id": "{self.id}", "description": "{self.description}", "date": "{self.date}"'
+        json = f'"id": "{self.id}", "description": "{self.description}", "date": "{self.date}", "severity": "{self.severity}", "cpe": "{self.cpe}"'
         for property in self.properties:
             json += f', "{property["name"]}": "{property["value"]}"'
         return f'{{{json}}}'
@@ -119,7 +122,7 @@ class DummySource(CveSource):
             },
             {
                 "name":    "keywords",
-                "help":    "Keywords to add to description",
+                "help":    "Comma separated list of keywords to add to the description",
                 "default": "foo,bar,blarg"
             }
         ]
@@ -187,6 +190,54 @@ class KeywordFilter(CveFilter):
     def setParameters(self, *params):
         self.term = params[0]
 
+class ToolFilter(CveFilter):
+    name = "tool"
+    @staticmethod
+    def getParameterDefinition() -> list:
+        return [
+            {
+                "name": "names",
+                "help": "Comma separated list of tools to search description for",
+                "default": None
+            }
+        ]
+    def __init__(self):
+        super().__init__()
+        self.tools = []
+    def filter(self, cves: list) -> list:
+        logging.debug(f"Returning items matching {self.tools}")
+        filtered_cves = []
+        for cve in cves:
+            for tool in self.tools:
+                if tool in cve.description.lower():
+                    logging.debug(f"Found tool {tool} in {cve.id}")
+                    cve.addProperty("tool", tool)
+                    filtered_cves.append(cve)
+        return filtered_cves
+    def setParameters(self, *params):
+        self.tools = params[0].split(',')
+
+class NistNvdApiFilter(CveFilter):
+    name = "nist-nvd-api"
+    endpoint = "https://services.nvd.nist.gov/rest/json/cve/1.0"
+    def __init__(self):
+        super().__init__()
+    def filter(self, cves: list) -> list:
+        logging.debug(f'Processing {len(cves)} CVEs')
+        for cve in cves:
+            logging.debug(f'Processing {cve.id}')
+            response = requests.get(f'{self.endpoint}/{cve.id}')
+            data = json.loads(response.content)
+            try:
+                cve.severity = data["result"]["CVE_Items"][0]["impact"]["baseMetricV3"]["cvssV3"]["baseSeverity"].lower()
+            except KeyError:
+                logging.warning(f"No severity available to {cve.id}")
+            try:
+                cve.cpe = json.dumps(data["result"]["CVE_Items"][0]["configurations"]["nodes"]).replace('"', '\\"')
+            except KeyError:
+                logging.warning(f"No CPE available")
+        return cves
+
 class NoFilter(CveFilter):
     name = "none"
     def __init__(self):
@@ -236,33 +287,66 @@ class GitLabIssuesTarget(CveTarget):
         ]
     def __init__(self):
         super().__init__()
+    def create_label(self, name, color):
+        logging.debug(f'Ensuring label {name} with color {color}')
+        labels = self.project.labels.list()
+        for label in labels:
+            if label.name == name:
+                logging.debug(f'Found label {name}')
+                if label.color != color:
+                    label.color = color
+                    label.save()
+                return
+        logging.debug(f'Creating label {name}')
+        self.project.labels.create({
+            "name":  name,
+            "color": color
+        })
+    def create_issue(self, cve, tool):
+        for issue in self.issues:
+            if issue.title == cve.id:
+                logging.info(f'Found issue for {cve.id}')
+                labels_new = [ f"tool/{tool}", f"severity/{cve.severity}" ]
+                for label in issue.labels:
+                    if "tool/" in label:
+                        pass
+                    elif "severity/" in label:
+                        pass
+                    else:
+                        logging.info(f'Copying label {label}')
+                        labels_new.append(label)
+                issue.labels = labels_new
+                issue.save()
+                return issue
+        logging.info(f'Creating issue for CVE with ID {cve.id}')
+        return self.project.issues.create({
+            "title": cve.id,
+            "description": f'{cve.link}\n\n{cve.description}',
+            "labels": [ f"tool/{tool}", "state/triage", f"severity/{cve.severity}" ]
+        })
     def put(self, cves: list):
-        self.gitlab = gitlab.Gitlab(self.server, private_token=self.token)
-        logging.debug(f'Fetching project with ID {self.project}')
-        project = self.gitlab.projects.get(self.project)
-        logging.debug(f'Got project with name {project.name_with_namespace}')
-        issues = project.issues.list(state="opened")
         for cve in cves:
-            create_issue = True
-            for issue in issues:
-                if issue.title == cve.id:
-                    create_issue = False
-            if not create_issue:
-                continue
-            logging.info(f'Creating issue for CVE with ID {cve.id}')
+            tool = "unknown"
             for property in cve.properties:
-                if property["name"] == "keyword":
+                if property["name"] == "tool":
                     tool = property["value"]
-            # labels
-            issue = project.issues.create({
-                "title": cve.id,
-                "description": cve.description,
-                "labels": [ f"tool/{tool}" ]
-            })
+            self.create_label(tool, "#6699cc")
+            self.create_issue(cve, tool)
     def setParameters(self, *params):
         self.server = params[0]
         self.token = params[1]
-        self.project = params[2]
+        self.project_id = params[2]
+        self.gitlab = gitlab.Gitlab(self.server, private_token=self.token)
+        logging.debug(f'Fetching project with ID {self.project_id}')
+        self.project = self.gitlab.projects.get(self.project_id)
+        self.create_label("state/triage", "#dc143c")
+        self.create_label("severity/low",      "#eee600")
+        self.create_label("severity/unknown",  "#808080")
+        self.create_label("severity/medium",   "#ed9121")
+        self.create_label("severity/high",     "#ff0000")
+        self.create_label("severity/critical", "#9400d3")
+        logging.debug(f'Got project with name {self.project.name_with_namespace}')
+        self.issues = self.project.issues.list()
 
 class ConsoleTarget(CveTarget):
     name = "console"
@@ -283,7 +367,9 @@ for source in CveSource.sources:
 CveFilter.filters = [
     NoFilter,
     FirstItemsFilter,
-    KeywordFilter
+    KeywordFilter,
+    ToolFilter,
+    NistNvdApiFilter
 ]
 filter_keys = []
 for filter in CveFilter.filters:
@@ -299,9 +385,9 @@ for target in CveTarget.targets:
 
 parser = argparse.ArgumentParser(prog="cve", description='Process CVEs', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--log-level", "-l", choices=["debug", "info", "warning", "error", "critical"], default="warning",        required=False,            help="Verbosity")
-parser.add_argument("--source",    "-s", choices=source_keys, default=source_keys[0],   required=False,            help="Where to get CVEs")
-parser.add_argument("--filter",    "-f", choices=filter_keys, default=[filter_keys[0]], required=False, nargs="*", help="Which CVEs to process")
-parser.add_argument("--target",    "-t", choices=target_keys, default=target_keys[0],   required=False,            help="Where to put CVEs")
+parser.add_argument("--source",    "-s", choices=source_keys, default=source_keys[0],                  required=False, help="Where to get CVEs")
+parser.add_argument("--filter",    "-f", choices=filter_keys,                         action="append", required=False, help="Which filter(s) to apply")
+parser.add_argument("--target",    "-t", choices=target_keys, default=target_keys[0],                  required=False, help="Where to put CVEs")
 
 for source in CveSource.sources:
     source_name = source.name
@@ -389,7 +475,7 @@ for target_type in CveTarget.targets:
     if target_type.name == target_name:
         target = target_type()
         break
-logging.debug(f"Using target of type {type(source)}")
+logging.debug(f"Using target of type {type(target)}")
 params = []
 for param in target.getParameterDefinition():
     arg_name = f'{target_name}_{param["name"]}'
