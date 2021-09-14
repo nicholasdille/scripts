@@ -81,14 +81,47 @@ class CveTarget:
     def setParameters(self, *params):
         pass
 
-class NistSource(CveSource):
-    name = "nist"
+class NistFeedSource(CveSource):
+    name = "nist-feed"
     @staticmethod
     def getParameterDefinition() -> list:
         return []
     # https://nvd.nist.gov/vuln/data-feeds
     metadata_url = "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.meta"
     recent_feed_url = "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.json.gz"
+    def __init__(self):
+        super().__init__()
+    def get(self) -> list:
+        cves = []
+        response = requests.get(self.recent_feed_url)
+        compressed_file = io.BytesIO(response.content)
+        decompressed_file = gzip.GzipFile(fileobj=compressed_file)
+        #wrapper = io.TextIOWrapper(decompressed_file)
+        items = json.loads(decompressed_file.read())
+        for item in items["CVE_Items"]:
+            for description_obj in item["cve"]["description"]["description_data"]:
+                if description_obj["lang"] == "en":
+                    description = description_obj["value"]
+                    break
+            cves.append(Cve(
+                item["cve"]["CVE_data_meta"]["ID"],
+                description,
+                item["publishedDate"]
+            ))
+        return cves
+
+class NistApiSource(CveSource):
+    name = "nist-api"
+    @staticmethod
+    def getParameterDefinition() -> list:
+        return []
+    # https://nvd.nist.gov/vuln/data-feeds#APIS
+    # https://csrc.nist.gov/CSRC/media/Projects/National-Vulnerability-Database/documents/web%20service%20documentation/Automation%20Support%20for%20CVE%20Retrieval.pdf
+    cve_url = "https://services.nvd.nist.gov/rest/json/cve/1.0"
+    collection_url = "https://services.nvd.nist.gov/rest/json/cves/1.0"
+
+    # curl -sv "https://services.nvd.nist.gov/rest/json/cves/1.0?modStartDate=2021-07-01T00:00:00:000%20UTC&keyword=kubernetes%20docker"
+
     def __init__(self):
         super().__init__()
     def get(self) -> list:
@@ -357,7 +390,7 @@ class ConsoleTarget(CveTarget):
             print(cve.toJson())
 
 CveSource.sources = [
-    NistSource,
+    NistFeedSource,
     DummySource
 ]
 source_keys = []
