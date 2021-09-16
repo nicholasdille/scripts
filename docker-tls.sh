@@ -22,7 +22,7 @@ CA_DN="${COMPANY_DN}/CN=Docker CA ${SERVER_CN}"
 SERVER_DN="${COMPANY_DN}/CN=${SERVER_CN}"
 CLIENT_DN="${COMPANY_DN}/CN=${CLIENT_CN}"
 
-SERVER_SAN="DNS=${SERVER_CN},DNS:${SERVER_SAN_DNS//,/,DNS:}"
+SERVER_SAN="DNS:${SERVER_CN},DNS:${SERVER_SAN_DNS//,/,DNS:}"
 if test -n "${SERVER_SAN_IP}"; then
     SERVER_SAN="${SERVER_SAN},IP:${SERVER_SAN_IP//,/,IP:}"
 fi
@@ -57,7 +57,7 @@ openssl req \
 
 echo "### Add extfile with SAN <${SERVER_SAN}>:"
 cat >>extfile.cnf <<EOF
-subjectAltName = DNS:${SERVER_CN},IP:10.10.10.20,IP:127.0.0.1
+subjectAltName = ${SERVER_SAN}
 extendedKeyUsage = serverAuth
 EOF
 
@@ -70,7 +70,7 @@ openssl x509 \
     -CA ca.pem \
     -CAkey ca-key.pem \
     -CAcreateserial \
-    -out server-cert.pem \
+    -out server.pem \
     -extfile extfile.cnf
 
 echo "### Generate client key pair:"
@@ -104,7 +104,7 @@ openssl x509 \
 
 echo "### Set permissions on private keys and certificates"
 chmod -v 0400 ca-key.pem key.pem server-key.pem
-chmod -v 0444 ca.pem server-cert.pem cert.pem
+chmod -v 0444 ca.pem server.pem cert.pem
 
 echo "### Remove temporary files"
 rm -v client.csr server.csr extfile.cnf extfile-client.cnf
