@@ -35,6 +35,7 @@ try:
     ingressroute_list = customObjectApi.list_namespaced_custom_object("traefik.containo.us", "v1alpha1", namespace, "ingressroutes")
     dnsendpoint_list = customObjectApi.list_namespaced_custom_object("externaldns.k8s.io", "v1alpha1", namespace, "dnsendpoints")
     certificate_list = customObjectApi.list_namespaced_custom_object("cert-manager.io", "v1", namespace, "certificates")
+    certificate_request_list = customObjectApi.list_namespaced_custom_object("cert-manager.io", "v1", namespace, "certificaterequests")
     cluster_role_binding_list = rbacAuthorizationV1Api.list_cluster_role_binding(watch=False)
 except Exception as e:
     print("Not able to reach Kubernetes cluster check Kubeconfig")
@@ -42,14 +43,13 @@ except Exception as e:
 
 graph = pydot.Dot("k8stree", graph_type="digraph", strict=True)
 
-#owner_queue = []
 def print_owner(kind, name, namespace, object, indentation):
     if type(object) is dict:
-        if "owner_references" in object["metadata"]:
-            for owner in object["metadata"]["owner_references"]:
-                print(f'{" " * indentation}Owned by {owner["kind"]}/{owner["name"]}')
-                graph.add_node(pydot.Node(f'{owner["kind"]} {owner["namespace"]}/{owner["name"]}', shape="box"))
-                graph.add_edge(pydot.Edge(f'{owner["kind"]} {owner["namespace"]}/{owner["name"]}', f'{kind} {namespace}/{name}'))
+        if "ownerReferences" in object["metadata"]:
+            for owner in object["metadata"]["ownerReferences"]:
+                print(f'{" " * indentation}Owned by {owner["kind"]} {object["metadata"]["namespace"]}/{owner["name"]}')
+                graph.add_node(pydot.Node(f'{owner["kind"]} {object["metadata"]["namespace"]}/{owner["name"]}', shape="box"))
+                graph.add_edge(pydot.Edge(f'{owner["kind"]} {object["metadata"]["namespace"]}/{owner["name"]}', f'{kind} {namespace}/{name}'))
                 resolve_owner(owner["kind"], owner["name"], object["metadata"]["namespace"], indentation + 2)
     else:
         if hasattr(object.metadata, "owner_references") and object.metadata.owner_references is not None:
@@ -84,10 +84,40 @@ def resolve_owner(kind, name, namespace, indentation=2):
     elif kind.lower() == "prometheus":
         object = customObjectApi.get_namespaced_custom_object("monitoring.coreos.com", "v1", namespace, "prometheuses", name)
 
+    elif kind.lower() == "certificaterequest":
+        object = customObjectApi.get_namespaced_custom_object("cert-manager.io", "v1", namespace, "certificaterequests", name)
+
+    elif kind.lower() == "certificate":
+        object = customObjectApi.get_namespaced_custom_object("cert-manager.io", "v1", namespace, "certificates", name)
+
     else:
         raise RuntimeError(f'Unknown kind {kind}')
 
     print_owner(kind, name, namespace, object, indentation)
+
+def process_container(pod, container):
+    if container.env is not None:
+        for env in container.env:
+            if env.value_from is not None:
+                if env.value_from.secret_key_ref is not None:
+                    print(f'    Env value from Secret {env.value_from.secret_key_ref.name}')
+                    graph.add_node(pydot.Node(f'Secret {pod.metadata.namespace}/{env.value_from.secret_key_ref.name}', shape="note"))
+                    graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'Secret {pod.metadata.namespace}/{env.value_from.secret_key_ref.name}'))
+                elif env.value_from.config_map_key_ref is not None:
+                    print(f'    Env value from ConfigMap {env.value_from.config_map_key_ref.name}')
+                    graph.add_node(pydot.Node(f'ConfigMap {pod.metadata.namespace}/{env.value_from.config_map_key_ref.name}', shape="note"))
+                    graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'ConfigMap {pod.metadata.namespace}/{env.value_from.config_map_key_ref.name}'))
+
+    if container.env_from is not None:
+        for env_from in container.env_from:
+            if env_from.secret_ref is not None:
+                print(f'    Env from Secret {env_from.secret_ref}')
+                graph.add_node(pydot.Node(f'Secret {pod.metadata.namespace}/{env_from.secret_ref}', shape="note"))
+                graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'Secret {pod.metadata.namespace}/{env_from.secret_ref}'))
+            elif env_from.config_map_ref:
+                print(f'    Env from ConfigMap {env_from.config_map_ref}')
+                graph.add_node(pydot.Node(f'ConfigMap {pod.metadata.namespace}/{env_from.config_map_ref}', shape="note"))
+                graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'ConfigMap {pod.metadata.namespace}/{env_from.config_map_ref}'))
 
 for pod in pod_list.items:
     print(f'Pod {pod.metadata.namespace}/{pod.metadata.name}:')
@@ -95,45 +125,23 @@ for pod in pod_list.items:
 
     resolve_owner("Pod", pod.metadata.name, pod.metadata.namespace)
 
-    # TODO: initContainers = pod.spec.initContainers
+    if pod.spec.init_containers is not None:
+        init_containers = pod.spec.init_containers
+        for init_container in init_containers:
+            print(f'  InitContainer {init_container.name}')
+            process_container(pod, init_container)
 
     containers = pod.spec.containers
     for container in containers:
         print(f'  Container {container.name}')
+        process_container(pod, container)        
 
-        # TODO: Factor out into function
-        if container.env is not None:
-            for env in container.env:
-                if env.value_from is not None:
-                    if env.value_from.secret_key_ref is not None:
-                        print(f'    Env value from Secret {env.value_from.secret_key_ref.name}')
-                        graph.add_node(pydot.Node(f'Secret {pod.metadata.namespace}/{env.value_from.secret_key_ref.name}', shape="note"))
-                        graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'Secret {pod.metadata.namespace}/{env.value_from.secret_key_ref.name}'))
-                    elif env.value_from.config_map_key_ref is not None:
-                        print(f'    Env value from ConfigMap {env.value_from.config_map_key_ref.name}')
-                        graph.add_node(pydot.Node(f'ConfigMap {pod.metadata.namespace}/{env.value_from.config_map_key_ref.name}', shape="note"))
-                        graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'ConfigMap {pod.metadata.namespace}/{env.value_from.config_map_key_ref.name}'))
-
-        # TODO: Factor out into function
-        if container.env_from is not None:
-            for env_from in container.env_from:
-                if env_from.secret_ref is not None:
-                    print(f'    Env from Secret {env_from.secret_ref}')
-                    graph.add_node(pydot.Node(f'Secret {pod.metadata.namespace}/{env_from.secret_ref}', shape="note"))
-                    graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'Secret {pod.metadata.namespace}/{env_from.secret_ref}'))
-                elif env_from.config_map_ref:
-                    print(f'    Env from ConfigMap {env_from.config_map_ref}')
-                    graph.add_node(pydot.Node(f'ConfigMap {pod.metadata.namespace}/{env_from.config_map_ref}', shape="note"))
-                    graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'ConfigMap {pod.metadata.namespace}/{env_from.config_map_ref}'))
-
-    # TODO: Factor our into function
     if pod.spec.image_pull_secrets is not None:
         for secret in pod.spec.image_pull_secrets:
             print(f'    Secret {pod.metadata.namespace}/{secret.name}')
             graph.add_node(pydot.Node(f'Secret {pod.metadata.namespace}/{secret.name}', shape="note"))
             graph.add_edge(pydot.Edge(f'Pod {pod.metadata.namespace}/{pod.metadata.name}', f'Secret {pod.metadata.namespace}/{secret.name}'))
 
-    # TODO: Factor out into function
     if pod.spec.volumes is not None:
         for volume in pod.spec.volumes:
             if volume.secret is not None:
@@ -186,12 +194,15 @@ for service in service_list.items:
         graph.add_node(pydot.Node(f'Service {service.metadata.namespace}/{service.metadata.name}'))
 
         endpoint = v1.read_namespaced_endpoints(service.metadata.name, service.metadata.namespace)
+        print(f'  Endpoint {endpoint.metadata.namespace}/{endpoint.metadata.name}')
+        graph.add_node(pydot.Node(f'Endpoint {endpoint.metadata.namespace}/{endpoint.metadata.name}'))
+        graph.add_edge(pydot.Edge(f'Service {service.metadata.namespace}/{service.metadata.name}', f'Endpoint {endpoint.metadata.namespace}/{endpoint.metadata.name}'))
         if endpoint.subsets is not None:
             for subset in endpoint.subsets:
                 for address in subset.addresses:
-                    print(f'  {address.target_ref.kind} {address.target_ref.namespace}/{address.target_ref.name}')
+                    print(f'    {address.target_ref.kind} {address.target_ref.namespace}/{address.target_ref.name}')
                     graph.add_node(pydot.Node(f'{address.target_ref.kind} {address.target_ref.namespace}/{address.target_ref.name}'))
-                    graph.add_edge(pydot.Edge(f'Service {service.metadata.namespace}/{service.metadata.name}', f'{address.target_ref.kind} {address.target_ref.namespace}/{address.target_ref.name}'))
+                    graph.add_edge(pydot.Edge(f'Endpoint {endpoint.metadata.namespace}/{endpoint.metadata.name}', f'{address.target_ref.kind} {address.target_ref.namespace}/{address.target_ref.name}'))
 
 if ingressroute_list is not None:
     for ingressroute in ingressroute_list["items"]:
@@ -231,6 +242,10 @@ if certificate_list is not None:
         print(f'  Secret {certificate["spec"]["secretName"]}')
         graph.add_node(pydot.Node(f'Secret {certificate["metadata"]["namespace"]}/{certificate["spec"]["secretName"]}', shape="note"))
         graph.add_edge(pydot.Edge(f'Certificate {certificate["metadata"]["namespace"]}/{certificate["metadata"]["name"]}', f'Secret {certificate["metadata"]["namespace"]}/{certificate["spec"]["secretName"]}'))
+if certificate_request_list is not None:
+    for certificate_request in certificate_request_list["items"]:
+        print(f'CertificateRequest {certificate_request["metadata"]["namespace"]}/{certificate_request["metadata"]["name"]}')
+        resolve_owner("CertificateRequest", certificate_request["metadata"]["name"], certificate_request["metadata"]["namespace"])
 
 # TODO: Ingress
 # TODO: prometheus-operator
