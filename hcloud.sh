@@ -65,46 +65,64 @@ docker-hcloud() {
     echo "Creating VM with type <${HCLOUD_TYPE}> and image <${HCLOUD_IMAGE}> in location <${HCLOUD_LOCATION}>"
 
     if ! test -f ~/.config/docker-hcloud/docker-user-data.txt; then
-        cat >~/.config/docker-hcloud/docker-user-data.txt <<EOF1
-#!/bin/bash
+        SSH_PUB_KEY="$(cat "${SSH_KEY_FILE}.pub")"
+        cat >~/.config/docker-hcloud/docker-user-data.txt <<EOF
+#cloud-config
 
-GROUP_NAME=user
-GROUP_ID=1000
-USER_NAME=user
-USER_ID=1000
-USER_SHELL=/bin/bash
-USER_HOME=/home/${USER_NAME}
+groups:
+- user
+users:
+- name: user
+  primary_group: user
+  ssh_authorized_keys:
+  - ${SSH_PUB_KEY}
+  sudo:
+  - ALL=(ALL) NOPASSWD:ALL
 
-apt-get update
-apt-get -y install \
-    bash \
-    curl \
-    jq \
-    git \
-    make
+apt:
+  conf: |
+    APT {
+      Install-Recommends "false";
+      Install-Suggests "false";
+      Get {
+        Assume-Yes "true";
+        Fix-Broken "true";
+      };
+    };
 
-curl -fL https://get.docker.com | sh
+package_update: true
+package_upgrade: true
+packages:
+- bash
+- curl
+- ca-certificates
+- jq
+- git
+- make
 
-groupadd --gid "${GROUP_ID}" "${GROUP_NAME}"
-useradd --create-home --shell "${USER_SHELL}" --uid "${USER_ID}" --gid "${GROUP_NAME}" "${USER_NAME}"
+write_files:
+- path: /opt/init_dotfiles.sh
+  owner: root:root
+  permissions: 0750
+  content: |
+    #!/bin/bash
+    set -xe
+    printenv | sort
+    git clone --bare https://github.com/nicholasdille/dotfiles "${USER_HOME}/.cfg"
+    alias config='/usr/bin/git --git-dir="${USER_HOME}/.cfg" --work-tree="${USER_HOME}"'
+    config config --local status.showUntrackedFiles no
+    rm "${USER_HOME}/.bash_logout" "${USER_HOME}/.bashrc" "${USER_HOME}/.profile"
+    config checkout
 
-mkdir "${USER_HOME}/.ssh"
-chmod 0700 "${USER_HOME}/.ssh"
-chown user:user "${USER_HOME}/.ssh"
-cp /root/.ssh/authorized_keys "${USER_HOME}/.ssh"
-chmod 0600 "${USER_HOME}/.ssh/authorized_keys"
-chown -R user:user "${USER_HOME}/.ssh"
+runcmd:
+- sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="systemd.unified_cgroup_hierarchy=1"/' /etc/default/grub
+- curl -fL https://get.docker.com | sh
+- sudo -u user env "USER=${USER_NAME}" "HOME=${USER_HOME}" bash /opt/init_dotfiles.sh
 
-sudo -u user env "USER=${USER_NAME}" "HOME=${USER_HOME}" bash <<EOF
-set -xe
-printenv | sort
-git clone --bare https://github.com/nicholasdille/dotfiles "${USER_HOME}/.cfg"
-alias config='/usr/bin/git --git-dir="${USER_HOME}/.cfg" --work-tree="${USER_HOME}"'
-config config --local status.showUntrackedFiles no
-rm "${USER_HOME}/.bash_logout" "${USER_HOME}/.bashrc" "${USER_HOME}/.profile"
-config checkout
+power_state:
+  mode: reboot
+  delay: now
 EOF
-EOF1
     fi
 
     HCLOUD_VM_IP=$(hcloud server list --selector docker-hcloud=true --output columns=ipv4 | tail -n +2)
