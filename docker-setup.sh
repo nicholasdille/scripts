@@ -86,8 +86,8 @@ fi
 
 # docker-scan
 DOCKER_SCAN_VERSION=0.8.0
-curl -sLo "${TARGET}/bin/docker-scan" "https://github.com/docker/scan-cli-plugin/releases/download/v${DOCKER_SCAN_VERSION}/docker-scan_linux_amd64"
-chmod +x "${TARGET}/bin/docker-scan"
+curl -sLo "${TARGET}/libexec/docker/cli-plugins/docker-scan" "https://github.com/docker/scan-cli-plugin/releases/download/v${DOCKER_SCAN_VERSION}/docker-scan_linux_amd64"
+chmod +x "${TARGET}/libexec/docker/cli-plugins/docker-scan"
 
 # hub-tool
 HUB_TOOL_VERSION=0.4.3
