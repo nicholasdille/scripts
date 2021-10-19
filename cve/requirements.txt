@@ -1,5 +1,0 @@
-logging
-argparse
-requests
-gzip
-gitlab
