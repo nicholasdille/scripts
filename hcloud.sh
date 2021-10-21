@@ -57,9 +57,9 @@ docker-hcloud() {
     #CONFIG_FILE=~/.config/docker-hcloud/config.sh
     #[[ -f "${CONFIG_FILE}" ]] && . ${CONFIG_FILE}
     test -n "${VM_BASE_NAME}" || local VM_BASE_NAME=docker
-    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-20.04
+    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-21.04
     test -n "${HCLOUD_LOCATION}" || local HCLOUD_LOCATION=fsn1
-    test -n "${HCLOUD_SSH_KEY}" || local HCLOUD_SSH_KEY=209622
+    test -n "${HCLOUD_SSH_KEY}" || local HCLOUD_SSH_KEY=4662975
     test -n "${HCLOUD_TYPE}" || local HCLOUD_TYPE=cx21
 
     echo "Creating VM with type <${HCLOUD_TYPE}> and image <${HCLOUD_IMAGE}> in location <${HCLOUD_LOCATION}>"
