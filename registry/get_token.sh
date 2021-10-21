@@ -1,18 +1,7 @@
 : "${TOKEN_AUTH_DEBUG:=false}"
 : "${TOKEN_AUTH_ANONYMOUS_PULL:=true}"
 
-get_docker_auth() {
-    local registry=$1
-
-    ${TOKEN_AUTH_DEBUG} && >&2 echo "DDD Got registry=<${registry}>"
-
-    if [[ "${#registry}" -eq 0 ]] || [[ "${registry}" == "index.docker.io" ]]; then
-        registry=https://index.docker.io/v1/
-    fi
-    ${TOKEN_AUTH_DEBUG} && >&2 echo "DDD Using registry=<${registry}>"
-
-    cat ~/.docker/config.json | jq --raw-output ".auths | to_entries[] | select(.key == \"${registry}\") | .value.auth" | base64 -d
-}
+source get_docker_auth.sh
 
 get_auth_user() {
     cat | cut -d: -f1
@@ -154,50 +143,4 @@ get_token() {
     esac
 
     rm -rf ${temp_dir}
-}
-
-get_manifest() {
-    curl \
-        -sL \
-        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-        http://localhost:5000/v2/hello-world-java/manifests/latest \
-    | jq
-}
-
-get_config() {
-    curl \
-        -sL \
-        -H "Accept: application/vnd.docker.container.image.v1+json" \
-        http://localhost:5000/v2/hello-world-java/manifests/latest \
-    | jq
-}
-
-get_layer() {
-    DIGEST=$(
-        curl \
-            -sL \
-            -H "Accept: application/vnd.docker.container.image.v1+json" \
-            http://localhost:5000/v2/hello-world-java/manifests/latest \
-        | jq --raw-output '.layers[-1].digest'
-    )
-
-    curl \
-        -sL \
-        -H "Accept: application/vnd.docker.image.rootfs.diff.tar.gzip" \
-        http://localhost:5000/v2/hello-world-java/blobs/${DIGEST} \
-    | tar -tvz
-}
-
-tag_remote() {
-    # Download manifest from old name
-    MANIFEST=$(curl --silent --location \
-        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-        localhost:5000/v2/hello-world-java/manifests/latest
-    )
-
-    # Push manifest with new name
-    curl --request PUT \
-        -H "Content-Type: application/vnd.docker.distribution.manifest.v2+json" \
-        -d "${MANIFEST}" \
-        localhost:5000/v2/hello-world-java/manifests/new
 }
