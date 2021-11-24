@@ -2,7 +2,6 @@ k8s2ssh() {
     if [[ "$#" == 1 ]]; then
         local CLUSTER=$1
     fi
-    SSH_KEY=${SSH_KEY:-~/id_rsa}
     if [[ -z "${CLUSTER}" ]]; then
         local CONTEXT=$(kubectl config current-context)
         local CLUSTER=$(kubectl config get-contexts ${CONTEXT} | tail -n +2 | tr -s ' ' | cut -d' ' -f3)
@@ -24,7 +23,6 @@ k8s2ssh() {
 Host ${SERVER_NAME} ${SERVER_IP}
     HostName ${SERVER_IP}
     User rdadm
-    IdentityFile ${SSH_KEY}
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 EOF

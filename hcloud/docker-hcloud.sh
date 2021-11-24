@@ -1,7 +1,5 @@
 docker-hcloud() {
     mkdir -p ~/.config/docker-hcloud
-    #CONFIG_FILE=~/.config/docker-hcloud/config.sh
-    #[[ -f "${CONFIG_FILE}" ]] && . ${CONFIG_FILE}
     test -n "${VM_BASE_NAME}" || local VM_BASE_NAME=docker
     test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-20.04
     test -n "${HCLOUD_LOCATION}" || local HCLOUD_LOCATION=fsn1
@@ -11,19 +9,8 @@ docker-hcloud() {
     echo "Creating VM with type <${HCLOUD_TYPE}> and image <${HCLOUD_IMAGE}> in location <${HCLOUD_LOCATION}>"
 
     if ! test -f ~/.config/docker-hcloud/docker-user-data.txt; then
-        SSH_PUB_KEY="$(cat "${SSH_KEY_FILE}.pub")"
         cat >~/.config/docker-hcloud/docker-user-data.txt <<EOF
 #cloud-config
-
-groups:
-- user
-users:
-- name: user
-  primary_group: user
-  ssh_authorized_keys:
-  - ${SSH_PUB_KEY}
-  sudo:
-  - ALL=(ALL) NOPASSWD:ALL
 
 apt:
   conf: |
@@ -62,6 +49,7 @@ write_files:
 
 runcmd:
 - sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="systemd.unified_cgroup_hierarchy=1"/' /etc/default/grub
+- update-grub
 - curl -fL https://get.docker.com | sh
 - sudo -u user env "USER=${USER_NAME}" "HOME=${USER_HOME}" bash /opt/init_dotfiles.sh
 
@@ -87,10 +75,9 @@ EOF
 
     # Creating SSH config
     cat >~/.ssh/config.d/docker-hcloud <<EOF
-Host docker-hcloud ${HCLOUD_VM_IP}
+Host docker-hcloud hcloud ${HCLOUD_VM_IP}
     HostName ${HCLOUD_VM_IP}
     User root
-    IdentityFile ~/.ssh/id_rsa_hetzner
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 EOF
