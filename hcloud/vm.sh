@@ -1,6 +1,6 @@
 vm-hcloud() {
     test -n "${VM_BASE_NAME}" || local VM_BASE_NAME=vm
-    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-20.04
+    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-22.04
     test -n "${HCLOUD_LOCATION}" || local HCLOUD_LOCATION=fsn1
     test -n "${HCLOUD_SSH_KEY}" || local HCLOUD_SSH_KEY=4662975
     test -n "${HCLOUD_TYPE}" || local HCLOUD_TYPE=cx21
