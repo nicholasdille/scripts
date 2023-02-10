@@ -1,0 +1,242 @@
+#!/bin/bash
+set -o errexit
+
+if ! type glab >/dev/null 2>&1; then
+    echo "ERROR: Missing required tool glab (https://github.com/profclems/glab)."
+    exit 1
+fi
+
+if test -z "${GITLAB_HOST}"; then
+    >&2 echo "Warning: GITLAB_HOST defaults to gitlab.com."    
+fi
+declare -A project_cache
+declare -A runner_cache
+
+function prefix() {
+    local prefix="  "
+    while read -r LINE; do
+        echo "${prefix}${LINE}"
+    done
+}
+
+# shellcheck disable=SC2120
+function indent() {
+    local count="${1-2}"
+    prefix="$(printf ' %.0s' "$(seq 1 "${count}")")"
+    prefix "${prefix}"
+}
+
+function join() {
+    local delim=" "
+    tr '\n' "${delim}"
+    echo
+}
+
+function colorize() {
+    local color="${1^^}"
+    local NORMAL="\e[39m\e[49m"
+    local GREEN="\e[92m"
+    local YELLOW="\e[93m"
+    local RED="\e[91m"
+    while read -r LINE; do
+        echo -e "${!color}${LINE}${NORMAL}"
+    done
+}
+
+function convert_age_seconds() {
+    local age_seconds=$1
+
+    local days=0
+    local hours=0
+    local minutes=0
+    local seconds="${age_seconds}"
+
+    if test "${age_seconds}" -gt 60; then
+        minutes=$(( age_seconds / 60 ))
+        seconds=$(( age_seconds % 60 ))
+    fi
+    if test "${minutes}" -gt 60; then
+        hours=$(( minutes / 60 ))
+        minutes=$(( minutes % 60 ))
+    fi
+    if test "${hours}" -gt 24; then
+        days=$(( hours / 24 ))
+        hours=$(( hours % 24 ))
+    fi
+
+    test "${days}"    -gt 0 && echo -n "${days}d"
+    test "${hours}"   -gt 0 && echo -n "${hours}h"
+    test "${minutes}" -gt 0 && echo -n "${minutes}m"
+    echo "${seconds}s"
+}
+
+function print_k8s_resource_name() {
+    jq --raw-output '.metadata.name'
+}
+
+function print_k8s_resource_labels() {
+    local delim=${1-: }
+    jq --raw-output --arg delim "${delim}" '.metadata.labels | to_entries[] | "\(.key)\($delim)\(.value)"'
+}
+
+function print_k8s_pod_info() {
+    local ITEM
+    ITEM="$(cat)"
+
+    local ready
+    local now_seconds
+    local created_timestamp
+    local created_seconds
+    ready="$(echo "${ITEM}" | jq -r '.status.conditions[] | select(.type == "Ready") | .status')"
+    now_seconds="$(date +%s)"
+    created_timestamp="$(echo "${ITEM}" | jq -r '.status.conditions[] | select(.type == "Ready" and .status == "True") | .lastTransitionTime')"
+    created_seconds="$(date -d "${created_timestamp}" +%s)"
+    age_seconds="$(( now_seconds - created_seconds ))"
+
+    echo "Ready: ${ready} (age $(convert_age_seconds ${age_seconds}))"
+}
+
+function print_gitlab_links_from_resource_labels() {
+    local project_id
+    local pipeline_id
+    local build_id
+    local job_id
+    while read -r LABEL; do
+        case "${LABEL}" in
+            project-id*)
+                project_id="$(echo "${LABEL}" | cut -d: -f2 | tr -d ' ')"
+                ;;
+            pipeline-id*)
+                pipeline_id="$(echo "${LABEL}" | cut -d: -f2 | tr -d ' ')"
+                ;;
+            job*)
+                job_id="$(echo "${LABEL}" | cut -d: -f2 | tr -d ' ')"
+                ;;
+            build-id*)
+                build_id="$(echo "${LABEL}" | cut -d: -f2 | tr -d ' ')"
+                ;;
+        esac
+    done
+
+    if test -z "${project_cache[${project_id}]}"; then
+        project_cache[${project_id}]="$(glab api "projects/${project_id}")"
+    fi
+
+    local project_path
+    project_path="$(echo "${project_cache[${project_id}]}" | jq --raw-output '.path_with_namespace')"
+
+    #echo "Project : https://${GITLAB_HOST}/${project_path}" | colorize yellow
+    echo "Pipeline: https://${GITLAB_HOST}/${project_path}/-/pipelines/${pipeline_id}" | colorize yellow
+    echo "Job     : https://${GITLAB_HOST}/${project_path}/-/jobs/${job_id}"
+    #echo "build-id: SELECT * FROM ci_builds WHERE id = ${build_id};"
+}
+
+function print_gitlab_runner_from_resource_labels() {
+    local runner_id
+    while read -r LABEL; do
+        case "${LABEL}" in
+            runner-id*)
+                runner_id="$(echo "${LABEL}" | cut -d: -f2 | tr -d ' ')"
+                ;;
+        esac
+    done
+
+    if test -z "${runner_cache[${runner_id}]}"; then
+        runner_cache[${runner_id}]="$(glab api "runners/${runner_id}")"
+    fi
+
+    local description
+    local tags
+    local active
+    local is_shared
+    local run_untagged
+    local runner_type
+    description="$(echo "${runner_cache[${runner_id}]}" | jq --raw-output '.description')"
+    tags="$(echo "${runner_cache[${runner_id}]}" | jq --raw-output '.tag_list[]' | tr '\n' ' ')"
+    active="$(echo "${runner_cache[${runner_id}]}" | jq --raw-output '.active')"
+    is_shared="$(echo "${runner_cache[${runner_id}]}" | jq --raw-output '.is_shared')"
+    run_untagged="$(echo "${runner_cache[${runner_id}]}" | jq --raw-output '.run_untagged')"
+    runner_type="$(echo "${runner_cache[${runner_id}]}" | jq --raw-output '.runner_type')"
+
+    echo "Runner     : https://${GITLAB_HOST}/admin/runners/${runner_id}" | colorize yellow
+    echo "Description: ${description}"
+    echo "Tags       : ${tags}"
+    echo "Details    : Active=${active}, Shared=${is_shared}, Untagged=${run_untagged}, Type=${runner_type}"
+    #echo "token      : ???"
+    #echo "runner-id  : ${runner_id}"
+}
+
+: "${SHOW_LABELS:=false}"
+: "${SHOW_RUNNER:=false}"
+while test "$#" -gt 0; do
+    parameter="$1"
+    shift
+
+    case "${parameter}" in
+        --labels)
+            SHOW_LABELS=true
+            ;;
+        --runner)
+            SHOW_RUNNER=true
+            ;;
+        --grep)
+            grep="$1"
+            shift
+            ;;
+        --head)
+            head="$1"
+            shift
+            ;;
+        --tail)
+            tail="$1"
+            shift
+            ;;
+        --filter)
+            filter="$1"
+            shift
+            ;;
+        --age)
+            age="$1"
+            shift
+            ;;
+    esac
+done
+
+PODS="$(
+    kubectl get pods -o json \
+    | jq --raw-output --compact-output '.items[] | select(.metadata.labels | keys[] | contains("runner-id"))'
+)"
+
+if test -n "${grep}"; then
+    PODS="$(echo "${PODS}" | jq --compact-output --arg grep "${grep}" '. | select(.metadata.name | contains($grep))')"
+fi
+if test -n "${head}"; then
+    PODS="$(echo "${PODS}" | head -n "${head}")"
+fi
+if test -n "${tail}"; then
+    PODS="$(echo "${PODS}" | tail -n "${tail}")"
+fi
+if test -n "${filter}"; then
+    PODS="$(echo "${PODS}" | jq --compact-output "${filter}")"
+fi
+if test -n "${age}"; then
+    age="$(echo "${age}" | sed -E 's/([0-9]+)d/\1 days /; s/([0-9]+)h/\1 hours /; s/([0-9]+)m/\1 minutes /; s/([0-9]+)s/\1 seconds /')"
+    timestamp="$(TZ=UTC date -d "${age} ago" +"%Y-%m-%dT%TZ")"
+    PODS="$(echo "${PODS}" | jq --compact-output --arg timestamp "${timestamp}" '. | select(any(.status.conditions[]; .type == "Ready" and .status == "True" and .lastTransitionTime < $timestamp))')"
+fi
+
+echo "${PODS}" | while read -r ITEM; do
+    echo "${ITEM}" | print_k8s_resource_name | colorize green
+    echo "${ITEM}" | print_k8s_pod_info | indent
+    echo
+    if ${SHOW_LABELS}; then
+        echo "${ITEM}" | print_k8s_resource_labels "=" | grep -E "^(runner-id|type|stage)" | join | indent
+        echo
+    fi
+    echo "${ITEM}" | print_k8s_resource_labels ": " | print_gitlab_links_from_resource_labels | indent
+    echo
+    if ${SHOW_RUNNER}; then
+        echo "${ITEM}" | print_k8s_resource_labels ": " | print_gitlab_runner_from_resource_labels | indent
+        echo
+    fi
+done
