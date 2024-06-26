@@ -1,10 +1,11 @@
 docker-hcloud() {
     mkdir -p ~/.config/docker-hcloud
     test -n "${VM_BASE_NAME}" || local VM_BASE_NAME=docker
-    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-22.04
+    test -n "${HCLOUD_IMAGE}" || local HCLOUD_IMAGE=ubuntu-24.04
     test -n "${HCLOUD_LOCATION}" || local HCLOUD_LOCATION=fsn1
-    test -n "${HCLOUD_SSH_KEY}" || local HCLOUD_SSH_KEY=4662975
-    test -n "${HCLOUD_TYPE}" || local HCLOUD_TYPE=cx21
+    test -n "${HCLOUD_SSH_KEY}" || local HCLOUD_SSH_KEY=21771045
+    test -n "${HCLOUD_TYPE}" || local HCLOUD_TYPE=cx22
+    test -n "${HCLOUD_IDENTITY_FILE}" || local HCLOUD_IDENTITY_FILE=~/.ssh/id_ed25519_hetzner
 
     echo "Creating VM with type <${HCLOUD_TYPE}> and image <${HCLOUD_IMAGE}> in location <${HCLOUD_LOCATION}>"
 
@@ -78,6 +79,7 @@ EOF
 Host docker-hcloud hcloud ${HCLOUD_VM_IP}
     HostName ${HCLOUD_VM_IP}
     User root
+    IdentityFile ${HCLOUD_IDENTITY_FILE}
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 EOF
