@@ -3,8 +3,21 @@ services:
   # https://github.com/ollama/ollama
   # https://hub.docker.com/r/ollama/ollama
   ollama:
-    image: ollama/ollama:latest
+    #image: ollama/ollama:0.6.8
+    build:
+      # https://github.com/mattcurf/ollama-intel-gpu
+      # https://github.com/intel/ipex-llm
+      # https://github.com/ipex-llm/ipex-llm
+      context: https://github.com/mattcurf/ollama-intel-gpu.git
+      args:
+        IPEXLLM_RELEASE_REPO: ipex-llm/ipex-llm
+        IPEXLLM_RELEASE_VERSON: v2.2.0
+        IPEXLLM_PORTABLE_ZIP_FILENAME: ollama-ipex-llm-2.2.0-ubuntu.tgz
+    devices:
+    - /dev/dri:/dev/dri
     environment:
+      ONEAPI_DEVICE_SELECTOR: level_zero:0
+      IPEX_LLM_NUM_CTX: 16384
       OLLAMA_KEEP_ALIVE: 24h
       OLLAMA_HOST: 0.0.0.0
     ports:
@@ -21,7 +34,7 @@ services:
       OLLAMA_BASE_URLS: http://ollama:11434
       ENV: dev
       WEBUI_AUTH: False
-      WEBUI_NAME: valiantlynx AI
+      WEBUI_NAME: Demo
       WEBUI_URL: http://localhost:8080
       WEBUI_SECRET_KEY: t0p-s3cr3t
     ports:
@@ -33,3 +46,13 @@ services:
     depends_on:
     - ollama
     restart: unless-stopped
+
+  # https://tabby.tabbyml.com/docs/
+  tabby:
+    image: registry.tabbyml.com/tabbyml/tabby:0.28.0
+    command: serve --model=StarCoder-1B --chat-model=Qwen2-1.5B-Instruct --device=vulkan
+    environment:
+      TABBY_DISABLE_USAGE_COLLECTION: 1
+    ports:
+    - 8081:8080
+    restart: always
