@@ -1,0 +1,35 @@
+services:
+
+  # https://github.com/ollama/ollama
+  # https://hub.docker.com/r/ollama/ollama
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+      OLLAMA_HOST: 0.0.0.0
+    ports:
+    - 11434:11434
+    pull_policy: always
+    restart: always
+
+  # https://github.com/open-webui/open-webui
+  ollama-webui:
+    depends_on:
+    - ollama
+    image: ghcr.io/open-webui/open-webui:main
+    environment: # https://docs.openwebui.com/getting-started/env-configuration#default_models
+      OLLAMA_BASE_URLS: http://ollama:11434
+      ENV: dev
+      WEBUI_AUTH: False
+      WEBUI_NAME: valiantlynx AI
+      WEBUI_URL: http://localhost:8080
+      WEBUI_SECRET_KEY: t0p-s3cr3t
+    ports:
+    - 8080:8080
+    restart: unless-stopped
+
+  co-op-gitlab:
+    build: https://github.com/rikvermeulen/co-op-gitlab.git
+    depends_on:
+    - ollama
+    restart: unless-stopped
